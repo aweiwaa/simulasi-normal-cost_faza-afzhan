@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kalkulator Normal Cost — Metode EAN</title>
 <style>
-/* CSS Styling - Clean & Modern */
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f7f7f5;color:#1a1a18;padding:24px 16px;max-width:720px;margin:0 auto}
 h1{font-size:20px;font-weight:500;margin-bottom:4px}
@@ -65,22 +64,32 @@ button.calc-btn:hover{background:#f7f7f5}
 </div>
 
 <div class="card">
-  <div class="sec">Asumsi decrement</div>
+  <div class="sec">Asumsi decrement — centang yang ingin digunakan</div>
+
   <div class="dec-row active" id="row-wr">
     <input type="checkbox" class="dec-check" id="chk-wr" checked onchange="toggleDec('wr')">
-    <span class="dec-name">Withdrawal (keluar)</span>
+    <span class="dec-name">Withdrawal (pengunduran diri)</span>
     <div class="dec-input-wrap"><input type="number" id="in-wr" value="1" step="0.5"><span class="dec-unit">%/thn</span></div>
   </div>
+
   <div class="dec-row active" id="row-mf">
     <input type="checkbox" class="dec-check" id="chk-mf" checked onchange="toggleDec('mf')">
     <span class="dec-name">Mortality (kematian)</span>
     <div class="dec-input-wrap"><input type="number" id="in-mf" value="1" step="0.1"><span class="dec-unit">× TMI</span></div>
   </div>
+
   <div class="dec-row active" id="row-er">
     <input type="checkbox" class="dec-check" id="chk-er" checked onchange="toggleDec('er')">
-    <span class="dec-name">Early retirement</span>
+    <span class="dec-name">Early retirement (pensiun dini)</span>
     <div class="dec-input-wrap"><input type="number" id="in-er" value="2" step="0.5"><span class="dec-unit">%/thn</span></div>
   </div>
+
+  <div class="dec-row active" id="row-dis">
+    <input type="checkbox" class="dec-check" id="chk-dis" checked onchange="toggleDec('dis')">
+    <span class="dec-name">Disability (kecacatan)</span>
+    <div class="dec-input-wrap"><input type="number" id="in-dis" value="0.003" step="0.001"><span class="dec-unit">× qx</span></div>
+  </div>
+
   <div id="err-msg" class="err" style="display:none">Pilih minimal 1 decrement.</div>
 </div>
 
@@ -88,13 +97,13 @@ button.calc-btn:hover{background:#f7f7f5}
 
 <div id="results" style="display:none">
   <div class="metric-grid">
-    <div class="metric"><div class="metric-label">Normal Cost</div><div class="metric-val" id="nc-val">—</div></div>
-    <div class="metric"><div class="metric-label">Survival Prob.</div><div class="metric-val" id="surv-val">—</div></div>
-    <div class="metric"><div class="metric-label">PVFB</div><div class="metric-val" id="pvfb-val">—</div></div>
+    <div class="metric"><div class="metric-label">Normal Cost</div><div class="metric-val" id="nc-val">—</div><div class="metric-sub">per tahun</div></div>
+    <div class="metric"><div class="metric-label">Survival prob.</div><div class="metric-val" id="surv-val">—</div><div class="metric-sub">aktif s.d pensiun</div></div>
+    <div class="metric"><div class="metric-label">PVFB</div><div class="metric-val" id="pvfb-val">—</div><div class="metric-sub">nilai kini manfaat</div></div>
   </div>
 
   <div class="card" id="elast-section">
-    <div class="sec">Sensitivitas Asumsi</div>
+    <div class="sec">Sensitivitas per Decrement</div>
     <div id="elast-bars"></div>
     <div id="kesimpulan-box"></div>
   </div>
@@ -106,7 +115,6 @@ button.calc-btn:hover{background:#f7f7f5}
 </div>
 
 <script>
-/* Logika JavaScript */
 function toggleDec(key) {
   const chk = document.getElementById('chk-'+key);
   const inp = document.getElementById('in-'+key);
@@ -127,9 +135,11 @@ function getP() {
     useWr: document.getElementById('chk-wr').checked,
     useMf: document.getElementById('chk-mf').checked,
     useEr: document.getElementById('chk-er').checked,
+    useDis: document.getElementById('chk-dis').checked,
     wr: +document.getElementById('in-wr').value / 100,
     mf: +document.getElementById('in-mf').value,
-    er: +document.getElementById('in-er').value / 100
+    er: +document.getElementById('in-er').value / 100,
+    dis: +document.getElementById('in-dis').value,
   };
 }
 
@@ -142,17 +152,16 @@ function computeNC(p, overrides={}) {
   const v = 1/(1+pp.disc);
   const yearsToRet = pp.ret - pp.age;
   const totalYears = pp.ret - pp.entry;
-  
+  if (yearsToRet <= 0 || totalYears <= 0) return {nc:0, surv:0, pvfb:0};
+
   let survActive = 1;
-  const survByYear = [];
   for (let t=0; t<yearsToRet; t++) {
     const a = pp.age + t;
     const qm = pp.useMf ? qx(a)*pp.mf : 0;
     const qw = pp.useWr ? ((a < pp.ret-5) ? pp.wr : 0) : 0;
     const qe = pp.useEr ? ((a >= pp.ret-10) ? pp.er : 0) : 0;
-    const qt = Math.min(qm+qw+qe, 0.99);
-    survActive *= (1-qt);
-    survByYear.push({a, qt, surv: survActive});
+    const qd = pp.useDis ? qm*pp.dis*100 : 0;
+    survActive *= (1 - Math.min(qm+qw+qe+qd, 0.99));
   }
 
   const salAtRet = pp.sal * Math.pow(1+pp.salg, yearsToRet);
@@ -163,12 +172,15 @@ function computeNC(p, overrides={}) {
   let survTemp = 1;
   for (let t=0; t<totalYears; t++) {
     const a = pp.entry + t;
-    const qt = (pp.useMf ? qx(a)*pp.mf : 0) + (pp.useWr ? pp.wr : 0);
-    survTemp *= (1-Math.min(qt, 0.99));
+    const qm = pp.useMf ? qx(a)*pp.mf : 0;
+    const qw = pp.useWr ? ((a < pp.ret-5) ? pp.wr : 0) : 0;
+    const qe = pp.useEr ? ((a >= pp.ret-10) ? pp.er : 0) : 0;
+    const qd = pp.useDis ? qm*pp.dis*100 : 0;
+    survTemp *= (1 - Math.min(qm+qw+qe+qd, 0.99));
     pvfncFactor += survTemp * Math.pow(v, t+1);
   }
 
-  return {nc: (pvfb/pvfncFactor)*1e6, surv: survActive, pvfb: pvfb*1e6, benefit: benefit*1e6, salAtRet: salAtRet*1e6, pvfncFactor};
+  return {nc: pvfncFactor > 0 ? (pvfb/pvfncFactor)*1e6 : 0, surv: survActive, pvfb: pvfb*1e6, benefit: benefit*1e6, salAtRet: salAtRet*1e6, pvfncFactor};
 }
 
 function fmt(n) {
@@ -177,31 +189,34 @@ function fmt(n) {
 
 function calc() {
   const p = getP();
+  const activeCount = [p.useWr, p.useMf, p.useEr, p.useDis].filter(Boolean).length;
+  document.getElementById('err-msg').style.display = activeCount === 0 ? 'block' : 'none';
+  if (activeCount === 0) return;
+
   const res = computeNC(p);
-  
   document.getElementById('results').style.display = 'block';
   document.getElementById('nc-val').textContent = fmt(res.nc);
   document.getElementById('surv-val').textContent = (res.surv*100).toFixed(2)+'%';
   document.getElementById('pvfb-val').textContent = fmt(res.pvfb);
 
-  // Analisis Sensitivitas & Kesimpulan
   const decs = [
     {key:'wr', useKey:'useWr', label:'Withdrawal', color:'#378ADD'},
     {key:'mf', useKey:'useMf', label:'Mortality', color:'#D85A30'},
-    {key:'er', useKey:'useEr', label:'Early Retirement', color:'#BA7517'}
+    {key:'er', useKey:'useEr', label:'Early Retirement', color:'#BA7517'},
+    {key:'dis', useKey:'useDis', label:'Disability', color:'#7F77DD'}
   ].filter(d => p[d.useKey]);
 
-  if (decs.length >= 1) {
+  if (decs.length > 0) {
     const elasticities = decs.map(d => {
-      const base = res.nc;
       const up = computeNC(p, {[d.key]: p[d.key]*1.01}).nc;
-      return {...d, e: (up-base)/base/0.01};
+      return {...d, e: (up - res.nc)/res.nc/0.01};
     });
 
     const palingSensitif = elasticities.reduce((a, b) => Math.abs(a.e) > Math.abs(b.e) ? a : b);
-    
+    const maxAbs = Math.max(...elasticities.map(x => Math.abs(x.e)), 0.001);
+
     document.getElementById('elast-bars').innerHTML = elasticities.map(d => {
-      const pct = (Math.abs(d.e)/Math.max(...elasticities.map(x=>Math.abs(x.e)))*100).toFixed(1);
+      const pct = (Math.abs(d.e)/maxAbs*100).toFixed(1);
       return `<div class="bar-row">
         <span class="bar-name">${d.label}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${d.color}"></div></div>
@@ -212,15 +227,15 @@ function calc() {
     const box = document.getElementById('kesimpulan-box');
     box.style.display = 'block';
     const arah = palingSensitif.e < 0 ? "menurunkan" : "meningkatkan";
-    box.innerHTML = `Jadi, decrement <strong>${palingSensitif.label}</strong> adalah yang paling memengaruhi valuasi kali ini. Perubahan asumsi di sini akan sangat signifikan <strong>${arah}</strong> nilai Normal Cost dibanding yang lain.`;
+    box.innerHTML = `Jadi, decrement <strong>${palingSensitif.label}</strong> adalah yang paling memengaruhi valuasi kali ini. Perubahan asumsi pada faktor ini akan sangat signifikan <strong>${arah}</strong> nilai Normal Cost dibandingkan faktor lainnya.`;
   }
 
-  // Langkah Manual
   document.getElementById('manual-steps').innerHTML = `
     <div class="step-box">Step 1 — Gaji Proyeksi: <code>${fmt(res.salAtRet)}</code></div>
     <div class="step-box">Step 2 — Manfaat Pensiun (Br): <code>${fmt(res.benefit)}/thn</code></div>
-    <div class="step-box">Step 3 — Survival sampai Pensiun: <code>${(res.surv*100).toFixed(2)}%</code></div>
-    <div class="step-box">Step 4 — Normal Cost: <code>${fmt(res.nc)} / tahun</code></div>
+    <div class="step-box">Step 3 — Probabilitas Survival (τ): <code>${(res.surv*100).toFixed(4)}%</code></div>
+    <div class="step-box">Step 4 — PVFNC Factor: <code>${res.pvfncFactor.toFixed(6)}</code></div>
+    <div class="step-box">Step 5 — Normal Cost (EAN): <code><strong>${fmt(res.nc)} / tahun</strong></code></div>
   `;
 }
 </script>
